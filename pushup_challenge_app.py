@@ -102,29 +102,49 @@ def user_dashboard():
 
 # Admin Panel to feed data
 def admin_panel():
-    st.title("Admin Panel")
-    username = st.text_input("Username to Update")
-    values = st.text_area("Enter 11-day pushup values (comma-separated)")
-    if st.button("Feed 11 Days Data"):
-        values = [int(v.strip()) for v in values.split(",") if v.strip().isdigit()]
-        if len(values) != 11:
-            st.error("Please enter exactly 11 numbers.")
+    st.title("🛠️ Admin Panel – Feed Previous Data")
+    
+    data = load_data()
+    usernames = list(data.keys())
+    if not usernames:
+        st.warning("No users found.")
+        return
+    
+    username = st.selectbox("Select a user", usernames)
+    num_days = st.number_input("How many days of data to add?", min_value=1, max_value=90, step=1)
+
+    values = st.text_area(f"Enter {num_days} pushup values (comma-separated)")
+    
+    if st.button("Submit Data"):
+        pushup_values = [int(v.strip()) for v in values.split(",") if v.strip().isdigit()]
+        if len(pushup_values) != num_days:
+            st.error(f"Please enter exactly {num_days} pushup values.")
             return
-        data = load_data()
-        if username not in data:
-            data[username] = {"total_pushups": 0, "daily_log": {}, "streak": 0, "last_entry": ""}
+        
         user = data[username]
-        start_date = datetime.today() - timedelta(days=11)
-        for i, count in enumerate(values):
+        start_date = datetime.today() - timedelta(days=num_days)
+        
+        for i, count in enumerate(pushup_values):
             day = (start_date + timedelta(days=i)).strftime('%Y-%m-%d')
-            user["daily_log"][day] = count
-            user["total_pushups"] += count
-        user["last_entry"] = (datetime.today() - timedelta(days=1)).strftime('%Y-%m-%d')
-        user["streak"] = sum(1 for i in range(10, -1, -1)
-                             if user["daily_log"].get((datetime.today() - timedelta(days=i)).strftime('%Y-%m-%d'), 0) > 0)
+            if day not in user["daily_log"]:
+                user["daily_log"][day] = count
+                user["total_pushups"] += count
+
+        # Update last_entry and streak
+        user["last_entry"] = max(user["daily_log"].keys())
+        # Count consecutive streak ending at yesterday
+        streak = 0
+        for i in range(1, 100):  # max 100 day backtrack
+            day = (datetime.today() - timedelta(days=i)).strftime('%Y-%m-%d')
+            if user["daily_log"].get(day, 0) > 0:
+                streak += 1
+            else:
+                break
+        user["streak"] = streak
+
         data[username] = user
         save_data(data)
-        st.success("Data fed successfully!")
+        st.success(f"✅ {num_days} days of pushup data added for {username}!")
 
 # Main App
 st.set_page_config(page_title="Pushup Challenge", layout="centered")
