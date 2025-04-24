@@ -3,11 +3,11 @@ import json
 import os
 from datetime import datetime, timedelta
 import pandas as pd
+import matplotlib.pyplot as plt
 
 DATA_FILE = "pushup_data.json"
 
-# ------------------ UTILITIES ------------------
-
+# ------------------- Data Handling -------------------
 def load_data():
     if not os.path.exists(DATA_FILE):
         return {}
@@ -18,21 +18,23 @@ def save_data(data):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
-def log_pushups(username, count, date=None):
+def log_pushups(username, count, date_str):
     data = load_data()
     user = data.get(username, {"daily_log": {}, "total_pushups": 0, "streak": 0})
-    if not date:
-        date = datetime.today().strftime('%Y-%m-%d')
 
-    if date not in user["daily_log"]:
-        user["daily_log"][date] = count
-        user["total_pushups"] += count
+    if date_str in user["daily_log"]:
+        return False, "Already logged for this date."
 
-    # Recalculate streak
+    user["daily_log"][date_str] = count
+    user["total_pushups"] = sum(user["daily_log"].values())
+
+    # Update streak
+    sorted_dates = sorted(user["daily_log"].keys())
     streak = 0
-    for i in range(1, 100):
-        day = (datetime.today() - timedelta(days=i)).strftime('%Y-%m-%d')
-        if user["daily_log"].get(day, 0) > 0:
+    today = datetime.today().strftime('%Y-%m-%d')
+    for offset in range(len(sorted_dates)):
+        check_date = (datetime.today() - timedelta(days=offset)).strftime('%Y-%m-%d')
+        if check_date in user["daily_log"]:
             streak += 1
         else:
             break
@@ -40,95 +42,64 @@ def log_pushups(username, count, date=None):
 
     data[username] = user
     save_data(data)
+    return True, f"{count} pushups logged for {username} on {date_str}."
 
-# ------------------ MAIN APP ------------------
+# ------------------- UI Sections -------------------
+st.set_page_config(page_title="Pushup Challenge Tracker", layout="wide")
+st.title("💪 90-Day Pushup Challenge Dashboard")
 
-st.set_page_config(page_title="90-Day Pushup Challenge", layout="centered")
-st.title("💪 90-Day Pushup Challenge")
+menu = st.sidebar.radio("Navigate", ["📊 Leaderboard", "🏋️ Log Today", "📅 Add Previous Data", "📈 My Stats"])
 
-menu = st.sidebar.radio("Menu", ["🏠 Leaderboard", "🏋️ Log Today", "➕ Add Data", "📈 Stats"])
-data = load_data()
-
-# ------------------ LEADERBOARD ------------------
-
-if menu == "🏠 Leaderboard":
-    st.subheader("🏆 Leaderboard (Total Pushups)")
+# ------------------- Leaderboard -------------------
+if menu == "📊 Leaderboard":
+    st.subheader("🏆 Leaderboard")
+    data = load_data()
     if data:
-        df = pd.DataFrame([
-            {"User": user, "Total Pushups": info["total_pushups"], "Streak": info["streak"]}
-            for user, info in data.items()
-        ])
-        st.dataframe(df.sort_values(by="Total Pushups", ascending=False), use_container_width=True)
+        leaderboard = sorted([(u, info["total_pushups"], info["streak"]) for u, info in data.items()],
+                             key=lambda x: (-x[1], -x[2]))
+        df = pd.DataFrame(leaderboard, columns=["Name", "Total Pushups", "Streak"])
+        st.dataframe(df, use_container_width=True)
     else:
-        st.info("No data yet.")
+        st.info("No data available yet.")
 
-# ------------------ LOG TODAY ------------------
-
+# ------------------- Log Today's Pushups -------------------
 elif menu == "🏋️ Log Today":
     st.subheader("🏋️ Log Today's Pushups")
+    username = st.text_input("Enter your name")
+    count = st.number_input("Pushups today", min_value=1, step=1)
+    if st.button("Log Pushups"):
+        today = datetime.today().strftime('%Y-%m-%d')
+        success, message = log_pushups(username.strip(), int(count), today)
+        st.success(message) if success else st.warning(message)
 
-    username = st.text_input("Enter your name:")
-    count = st.number_input("Number of pushups today", min_value=1, step=1)
+# ------------------- Add Previous Data -------------------
+elif menu == "📅 Add Previous Data":
+    st.subheader("🕓 Add Pushups for a Previous Date")
+    username = st.text_input("User name")
+    date = st.date_input("Date")
+    count = st.number_input("Pushups", min_value=1, step=1)
+    if st.button("Add Entry"):
+        date_str = date.strftime('%Y-%m-%d')
+        success, message = log_pushups(username.strip(), int(count), date_str)
+        st.success(message) if success else st.warning(message)
 
-    if st.button("Submit Today's Pushups"):
-        if not username:
-            st.error("Please enter a name.")
+# ------------------- My Stats -------------------
+elif menu == "📈 My Stats":
+    st.subheader("📈 Personal Stats")
+    username = st.text_input("Enter your name")
+    if st.button("Show Stats"):
+        data = load_data()
+        user = data.get(username)
+        if not user:
+            st.warning("User not found.")
         else:
-            today = datetime.today().strftime('%Y-%m-%d')
-            data = load_data()
-            user = data.get(username, {"daily_log": {}, "total_pushups": 0, "streak": 0})
+            st.markdown(f"**Total Pushups:** {user['total_pushups']}")
+            st.markdown(f"**Current Streak:** {user['streak']}")
 
-            if today in user["daily_log"]:
-                st.warning("You've already logged pushups for today.")
-            else:
-                log_pushups(username, int(count))
-                st.success(f"✅ {count} pushups logged for {username} on {today}!")
+            daily = user["daily_log"]
+            dates = list(daily.keys())
+            values = list(daily.values())
 
-# ------------------ ADD PAST DATA ------------------
-
-elif menu == "➕ Add Data":
-    st.subheader("📆 Add Previous Pushup Data")
-
-    username = st.text_input("Enter your name:")
-    num_days = st.number_input("How many past days to enter?", min_value=1, max_value=90, step=1)
-    values = st.text_area(f"Enter {num_days} pushup values (comma-separated):")
-
-    if st.button("Submit Past Data"):
-        if not username or not values:
-            st.error("Please fill all fields.")
-        else:
-            pushups = [int(x.strip()) for x in values.split(",") if x.strip().isdigit()]
-            if len(pushups) != num_days:
-                st.error(f"Enter exactly {num_days} values.")
-            else:
-                for i in range(num_days):
-                    date = (datetime.today() - timedelta(days=num_days - i)).strftime('%Y-%m-%d')
-                    log_pushups(username, pushups[i], date)
-                st.success(f"✅ {num_days} days of data added for {username}!")
-
-# ------------------ USER STATS ------------------
-
-elif menu == "📈 Stats":
-    st.subheader("📊 User Progress & Stats")
-
-    if data:
-        selected_user = st.selectbox("Select a user", list(data.keys()))
-        user_data = data[selected_user]
-
-        total = user_data["total_pushups"]
-        streak = user_data["streak"]
-        log = user_data["daily_log"]
-
-        st.markdown(f"**Total Pushups:** {total}")
-        st.markdown(f"**Current Streak:** {streak} days")
-        st.markdown(f"**Average/Day:** {round(total / len(log), 2)}")
-
-        # Chart
-        st.markdown("### 📈 Daily Pushup Progress")
-        df = pd.DataFrame.from_dict(log, orient='index', columns=['Pushups'])
-        df.index = pd.to_datetime(df.index)
-        df = df.sort_index()
-        st.line_chart(df)
-
-    else:
-        st.info("No user data available.")
+            df = pd.DataFrame({"Date": pd.to_datetime(dates), "Pushups": values}).sort_values("Date")
+            st.line_chart(df.set_index("Date"))
+            st.bar_chart(df.set_index("Date"))
