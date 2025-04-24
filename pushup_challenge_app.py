@@ -3,7 +3,7 @@ import json
 import os
 from datetime import datetime, timedelta
 import pandas as pd
-import matplotlib.pyplot as plt
+
 
 DATA_FILE = "pushup_data.json"
 
